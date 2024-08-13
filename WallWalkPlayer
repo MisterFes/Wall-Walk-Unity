@@ -1,0 +1,348 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Tilemaps;
+
+public class WallWalkPlayer : MonoBehaviour
+{
+    [SerializeField] private float wallDetectionDistance, wallWalkPhysicsRotationSpeed;
+    [SerializeField] private float centeredWorldPositionOffset;
+    [SerializeField] private Collider2D physicsCollider;
+
+    private Vector2 GROUND_NORMAL = Vector2.zero;
+    private Vector3 lastSurfacePointDetected, edgeOrbitPoint;
+    private Coroutine groundCheckCoroutine, walkCoroutine;
+    private bool orbitingEdge;
+
+    // Gabrie.
+    [SerializeField] private Animator anim;
+    [SerializeField] private SpriteRenderer art;
+    //
+
+    private void OnEnable()
+    {
+        GROUNDED = false;
+        playerRigidBody.gravityScale = sourceAtributes.gravityScale;
+
+        if (groundCheckCoroutine == null) StartCoroutine(ienumGroundCheck());
+
+        StartCoroutine(ienumWallWalkController());
+    }
+
+    private void OnDisable()
+    {
+        if (groundCheckCoroutine != null) StopCoroutine(groundCheckCoroutine);
+    }
+
+    private void Update()
+    {
+        centeredWorldPosition = actualBodyTransform.position;
+
+        if (CAN_WALK) walking = GetInputs();
+
+        //WallWalkController();
+
+        /*if ((Input.GetButtonDown("Horizontal") || Input.GetButtonDown("Vertical")))
+        {
+            // Gabriel
+            //anim.SetBool("active", true);
+            //
+            if (walkCoroutine != null) StopCoroutine(walkCoroutine);
+            walkCoroutine = StartCoroutine(ienumControlPlayerVelocityWallWalk());
+        }*/
+
+        StartCoroutine(Animation());
+    }
+
+    private void FixedUpdate()
+    {
+        if (CAN_WALK)
+        {
+            if (Mathf.Abs(GROUND_NORMAL.x) < 0.01f)
+            {
+                playerRigidBody.velocity = new Vector2(horizontalInput * sourceAtributes.walkingSpeed, 0);
+            }
+            else if (Mathf.Abs(GROUND_NORMAL.y) < 0.01f)
+            {
+                playerRigidBody.velocity = new Vector2(0, verticalInput * sourceAtributes.walkingSpeed);
+            }
+            else
+            {
+                float resultingDirectionForce = 0;
+
+                if((GROUND_NORMAL.x > 0 && GROUND_NORMAL.y > 0) || (GROUND_NORMAL.x < 0 && GROUND_NORMAL.y < 0)) resultingDirectionForce -= horizontalInput;
+                else resultingDirectionForce += horizontalInput;
+                resultingDirectionForce += verticalInput;
+
+                playerRigidBody.velocity = actualBodyTransform.right * resultingDirectionForce * sourceAtributes.walkingSpeed;
+            }
+        }
+        
+        if (!walking)
+        {
+            if (GROUNDED)
+            {
+                playerRigidBody.velocity = Vector2.MoveTowards(playerRigidBody.velocity, Vector2.zero, Time.deltaTime * walkDeceleration);
+            }
+            else playerRigidBody.velocity = Vector2.MoveTowards(playerRigidBody.velocity, new Vector2(0, playerRigidBody.velocity.y), Time.deltaTime * walkDeceleration);
+        }
+    }
+
+    // Gabriel 
+    IEnumerator Animation()
+    {
+        float mx = Input.GetAxisRaw("Horizontal");
+        float my = Input.GetAxisRaw("Vertical");
+
+        if (mx != 0 || my != 0 || playerRigidBody.velocity != Vector2.zero) anim.SetBool("active", true);
+        else if (mx == 0 || my != 0 || playerRigidBody.velocity == Vector2.zero) anim.SetBool("active", false);
+
+        // flips
+        if (mx == 1) art.flipX = false;
+        else if (mx == -1) art.flipX = true;
+
+        if (my == 1 && transform.localRotation.z > 0) art.flipX = false;
+        else if (my == -1 && transform.localRotation.z > 0) art.flipX = true;
+
+        if (my == 1 && transform.localRotation.z < 0) art.flipX = true;
+        else if (my == -1 && transform.localRotation.z < 0) art.flipX = false;
+
+        yield return null;
+    }
+    //
+
+    private IEnumerator ienumWallWalkController()
+    {
+        /*while (orbitingEdge)
+        {
+            RaycastHit2D[] scenarioDetectionHits = new RaycastHit2D[4];
+            Vector2 newGroundNormal = Vector2.zero;
+
+            for (int i = 0; i < scenarioDetectionHits.Length; i++)
+            {
+                scenarioDetectionHits[i] = Physics2D.Raycast(centeredWorldPosition + (actualBodyTransform.up * centeredWorldPositionOffset), new Vector2(Mathf.Sin(Mathf.Deg2Rad * (-90 + (i * 90))), Mathf.Sin(Mathf.Deg2Rad * (180 - (i * 90)))), wallDetectionDistance, solidScenarioLayer);
+
+                if (scenarioDetectionHits[i].collider != null) orbitingEdge = false;
+            }
+
+            yield return null;
+        }*/
+
+        //playerRigidBody.velocity = Vector2.zero;
+
+        while (!orbitingEdge)
+        {
+            RaycastHit2D[] scenarioDetectionHits = new RaycastHit2D[4];
+            Vector2 newGroundNormal = Vector2.zero;
+
+            //GROUND_NORMAL = Vector2.zero;
+
+            for (int i = 0; i < scenarioDetectionHits.Length; i++)
+            {
+                scenarioDetectionHits[i] = Physics2D.Raycast(centeredWorldPosition + (actualBodyTransform.up * centeredWorldPositionOffset), new Vector2(Mathf.Sin(Mathf.Deg2Rad * (-90 + (i * 90))), Mathf.Sin(Mathf.Deg2Rad * (180 - (i * 90)))), wallDetectionDistance, solidScenarioLayer);
+                Debug.DrawRay(centeredWorldPosition + (actualBodyTransform.up / 5), new Vector2(Mathf.Sin(Mathf.Deg2Rad * (-90 + (i * 90))), Mathf.Sin(Mathf.Deg2Rad * (180 - (i * 90)))).normalized * wallDetectionDistance);
+
+                if (scenarioDetectionHits[i].collider != null)
+                {
+                    //GROUND_NORMAL += scenarioDetectionHits[i].normal / scenarioDetectionHits[i].distance;
+                    newGroundNormal += scenarioDetectionHits[i].normal / scenarioDetectionHits[i].distance;
+                    lastSurfacePointDetected = scenarioDetectionHits[i].point;
+                }
+            }
+
+            //if (GROUND_NORMAL == Vector2.zero && GROUNDED)
+            /*if (newGroundNormal == Vector2.zero && GROUNDED)
+            {
+                edgeOrbitPoint = lastSurfacePointDetected;
+                //playerRigidBody.velocity = Vector2.zero;
+                orbitingEdge = true;
+                break;
+                //GROUND_NORMAL = centeredWorldPosition - lastSurfacePointDetected;
+            }
+            else orbitingEdge = false;*/
+
+            GROUND_NORMAL = newGroundNormal;
+            GROUND_NORMAL.Normalize();
+
+            actualBodyTransform.up = Vector3.RotateTowards(actualBodyTransform.up, GROUND_NORMAL, Time.deltaTime * wallWalkPhysicsRotationSpeed, 0f);
+
+            yield return null;
+        }
+
+        Vector3 edgeTargetUpper, edgeTargetLower;
+        Vector3 edgeNormal = GROUND_NORMAL.normalized + playerRigidBody.velocity.normalized;
+        float edgeRotationProgress;
+        bool invertedHorizontalInput;
+
+        if (GROUND_NORMAL.normalized.y > playerRigidBody.velocity.normalized.y)
+        {
+            edgeTargetUpper = GROUND_NORMAL.normalized;
+            edgeTargetLower = playerRigidBody.velocity.normalized;
+
+            edgeRotationProgress = 0.9f;
+        }
+        else
+        {
+            edgeTargetUpper = playerRigidBody.velocity.normalized;
+            edgeTargetLower = GROUND_NORMAL.normalized;
+
+            edgeRotationProgress = 0.1f;
+        }
+
+        if ((edgeNormal.x < 0 && edgeNormal.y < 0) || (edgeNormal.x > 0) && edgeNormal.y > 0)
+        {
+            invertedHorizontalInput = true;
+        }
+        else
+        {
+            invertedHorizontalInput = false;
+        }
+
+        playerRigidBody.velocity = Vector2.zero;
+        actualBodyTransform.position = lastSurfacePointDetected;
+
+        while (edgeRotationProgress != 0 && edgeRotationProgress != 1)
+        {
+            float resultingDirection = 0;
+            
+            if (invertedHorizontalInput) resultingDirection -= horizontalInput;
+            else resultingDirection += horizontalInput;
+
+            resultingDirection += verticalInput;
+
+            edgeRotationProgress += resultingDirection * Time.deltaTime * sourceAtributes.walkingSpeed * 1.5f;
+            edgeRotationProgress = Mathf.Clamp(edgeRotationProgress, 0, 1);
+
+            actualBodyTransform.up = Vector3.Lerp(edgeTargetLower, edgeTargetUpper, edgeRotationProgress);
+
+            yield return null;
+        }
+
+        if (edgeRotationProgress == 0)
+        {
+            playerRigidBody.velocity = -edgeTargetUpper * sourceAtributes.walkingSpeed;
+        }
+        if(edgeRotationProgress == 1)
+        {
+            playerRigidBody.velocity = -edgeTargetLower * sourceAtributes.walkingSpeed;
+        }
+
+        playerRigidBody.velocity *= Mathf.Abs(horizontalInput + verticalInput);
+
+        StartCoroutine(ienumWallWalkController());
+    }
+
+    /*private void WallWalkController()
+    {
+        RaycastHit2D[] scenarioDetectionHits = new RaycastHit2D[4];
+        Vector2 newGroundNormal = Vector2.zero;
+
+        GROUND_NORMAL = Vector2.zero;
+
+        for (int i = 0; i < 4; i++)
+        {
+            scenarioDetectionHits[i] = Physics2D.Raycast(centeredWorldPosition, new Vector2(Mathf.Sin(Mathf.Deg2Rad * (-90 + (i * 90))), Mathf.Sin(Mathf.Deg2Rad * (180 - (i * 90)))), wallDetectionDistance, solidScenarioLayer);
+            Debug.DrawRay(centeredWorldPosition, new Vector2(Mathf.Sin(Mathf.Deg2Rad * (-90 + (i * 90))), Mathf.Sin(Mathf.Deg2Rad * (180 - (i * 90)))).normalized * wallDetectionDistance);
+
+            if (scenarioDetectionHits[i].collider != null)
+            {
+                //GROUND_NORMAL += scenarioDetectionHits[i].normal / scenarioDetectionHits[i].distance;
+                newGroundNormal += scenarioDetectionHits[i].normal / scenarioDetectionHits[i].distance;
+                lastSurfacePointDetected = scenarioDetectionHits[i].point;
+            }
+        }
+
+        //if (GROUND_NORMAL == Vector2.zero && GROUNDED)
+        if(newGroundNormal == Vector2.zero && GROUNDED)
+        {
+            edgeOrbitPoint = lastSurfacePointDetected;
+            playerRigidBody.velocity = Vector2.zero;
+            orbitingEdge = true;
+            //GROUND_NORMAL = centeredWorldPosition - lastSurfacePointDetected;
+        }
+        else orbitingEdge = false;
+
+        GROUND_NORMAL.Normalize();
+
+        actualBodyTransform.up = Vector3.RotateTowards(actualBodyTransform.up, GROUND_NORMAL, Time.deltaTime * wallWalkPhysicsRotationSpeed, 0f);
+    }*/
+
+    private IEnumerator ienumControlPlayerVelocityWallWalk()
+    {
+        float resultingForce = sourceAtributes.walkingSpeed;
+        float resultingDirection = 0;
+
+        while (walking)
+        {
+            if (!orbitingEdge)
+            {
+                if (Mathf.Abs(GROUND_NORMAL.x) < 0.01f)
+                {
+                    playerRigidBody.velocity = new Vector2(horizontalInput * resultingForce, 0);
+                }
+                else if (Mathf.Abs(GROUND_NORMAL.y) < 0.01f)
+                {
+                    playerRigidBody.velocity = new Vector2(0, verticalInput * resultingForce);
+                }
+                else
+                {
+                    if (actualBodyTransform.right.x > 0) resultingDirection += horizontalInput;
+                    else resultingDirection -= horizontalInput;
+
+                    if (actualBodyTransform.right.y > 0) resultingDirection += verticalInput;
+                    else resultingDirection -= verticalInput;
+
+                    if (orbitingEdge)
+                    {
+                        playerRigidBody.velocity = (actualBodyTransform.right * (resultingForce / 2) * Mathf.Clamp(resultingDirection, -1f, 1f)) - (new Vector3(actualBodyTransform.up.x, actualBodyTransform.up.y) * 2);
+                        //playerRigidBody.velocity -= new Vector2(actualBodyTransform.up.x, actualBodyTransform.up.y) * 2.5f;
+                    }
+                    else playerRigidBody.velocity = actualBodyTransform.right * resultingForce * Mathf.Clamp(resultingDirection, -1f, 1f);
+
+                    Vector2.ClampMagnitude(playerRigidBody.velocity, 2f);
+                }
+            }
+
+            yield return null;
+        }
+
+        /*while (!walking && playerRigidBody.velocity.magnitude > 0)
+        {
+            if (GROUNDED)
+            {
+                playerRigidBody.velocity = Vector2.MoveTowards(playerRigidBody.velocity, Vector2.zero, Time.deltaTime * walkDeceleration);
+
+                if (orbitingEdge) playerRigidBody.velocity -= GROUND_NORMAL;
+            }
+            else playerRigidBody.velocity = Vector2.MoveTowards(playerRigidBody.velocity, new Vector2(0, playerRigidBody.velocity.y), Time.deltaTime * walkDeceleration);
+
+            yield return null;
+        }*/
+    }
+
+    private IEnumerator ienumGroundCheck()
+    {
+        while (GROUNDED)
+        {
+            yield return null;
+        }
+
+        playerRigidBody.gravityScale = sourceAtributes.gravityScale;
+        physicsCollider.isTrigger = false;
+
+        while (!GROUNDED)
+        {
+            Collider2D wallCollisions = Physics2D.OverlapCircle(actualBodyTransform.position, wallDetectionDistance / 2, solidScenarioLayer);
+
+            if (wallCollisions)
+            {
+                GROUNDED = true;
+                playerRigidBody.gravityScale = 0;
+                playerRigidBody.velocity = new Vector2(playerRigidBody.velocity.x, 0);
+                physicsCollider.isTrigger = true;
+            }
+
+            yield return null;
+        }
+    }
+}
